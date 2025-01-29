@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>File Analysis with Streaming</title>
+  <style>
+    /* General Styling */
+    body {
+      font-family: 'Arial', sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f7f9fc;
+      color: #333;
+    }
+
+    h1 {
+      text-align: center;
+      color: #2c3e50;
+    }
+
+    p {
+      text-align: center;
+      margin: 10px 0 30px;
+      font-size: 1.1em;
+    }
+
+    input[type="file"] {
+      display: block;
+      margin: 0 auto 20px;
+      font-size: 1em;
+      padding: 8px;
+    }
+
+    button {
+      display: block;
+      margin: 0 auto;
+      padding: 10px 20px;
+      font-size: 1em;
+      background-color: #3498db;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #2980b9;
+    }
+
+    #results {
+      margin-top: 30px;
+    }
+
+    /* Individual Response Block Styling */
+    .file-result {
+      background-color: #ffffff;
+      border: 1px solid #dfe6e9;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .file-result h3 {
+      margin-bottom: 10px;
+      font-size: 1.2em;
+      color: #34495e;
+    }
+
+    .file-result pre {
+      background-color: #ecf0f1;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+      font-family: 'Courier New', Courier, monospace;
+      white-space: pre-wrap; /* Wrap long lines */
+      word-wrap: break-word;
+    }
+  </style>
+</head>
+<body>
+  <h1>Analyze React Native Files</h1>
+  <p>Select files to analyze, and view streaming suggestions in a clean, structured format.</p>
+  <input type="file" id="fileInput" multiple>
+  <button id="uploadBtn">Upload and Analyze</button>
+  <div id="results"></div>
+
+  <script>
+    document.getElementById('uploadBtn').addEventListener('click', async () => {
+      const fileInput = document.getElementById('fileInput');
+      const files = fileInput.files;
+      const apiUrl = "http://localhost:11434/api/generate"; // Update with your API URL
+      const actualPrompt = "Analyze the following React Native files we are building a banking app, provide code suggestions, optimization, security, reusability & best coding practices.";
+
+      if (!files.length) {
+        alert('Please select at least one file.');
+        return;
+      }
+
+      const resultsDiv = document.getElementById('results');
+      resultsDiv.innerHTML = '';
+
+      for (const file of files) {
+        const fileContent = await file.text();
+        const combinedPrompt = `${actualPrompt}\n\nFile: ${file.name}\n\n${fileContent}`;
+
+        const payload = {
+          model: "deepseek-r1:8b",
+          prompt: combinedPrompt,
+          stream: true, // Enable streaming in the request
+        };
+
+        const fileResultDiv = document.createElement('div');
+        fileResultDiv.className = 'file-result';
+        fileResultDiv.innerHTML = `<h3>Response for ${file.name}:</h3><pre id="response-${file.name}">Loading...</pre>`;
+        resultsDiv.appendChild(fileResultDiv);
+
+        try {
+          // Send file content to the API
+          const response = await fetch(apiUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to process ${file.name}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          const responsePre = document.getElementById(`response-${file.name}`);
+          responsePre.innerText = ''; // Clear the "Loading..." text
+
+          let partialChunk = ''; // Store partial chunks for proper JSON parsing
+
+          // Read the response stream
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            // Decode the chunk and process it
+            const chunk = decoder.decode(value, { stream: true });
+            partialChunk += chunk;
+
+            // Process JSON objects in the partialChunk
+            let boundary = partialChunk.indexOf('\n');
+            while (boundary !== -1) {
+              const line = partialChunk.slice(0, boundary).trim();
+              partialChunk = partialChunk.slice(boundary + 1);
+
+              if (line) {
+                try {
+                  const parsed = JSON.parse(line); // Parse the JSON chunk
+                  if (parsed.response) {
+                    responsePre.innerText += parsed.response; // Append the response field
+                  }
+                } catch (err) {
+                  console.error('Error parsing JSON:', err);
+                }
+              }
+              boundary = partialChunk.indexOf('\n');
+            }
+          }
+        } catch (error) {
+          const errorDiv = document.createElement('div');
+          errorDiv.innerHTML = `<h3>Error processing ${file.name}:</h3><p>${error.message}</p>`;
+          resultsDiv.appendChild(errorDiv);
+        }
+      }
+    });
+  </script>
+</body>
+</html>
